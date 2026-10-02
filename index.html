@@ -37,7 +37,7 @@
 
   <script>
     // --- 1. НАСТРОЙКИ БОТА И БЭКЕНДА ---
-    const BOT_USERNAME = 'caucas.job_bot'; // Твой бот
+    const BOT_USERNAME = 'caucasjob_bot'; // Твой бот
     const BACKEND_URL = 'http://localhost:3000'; // Локальный сервер Node.js
 
     // --- 2. ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ (LOCALSTORAGE) ---
@@ -303,7 +303,7 @@
 
     function renderAuth(container) {
       const sessionCode = 'AUTH_' + Math.floor(100000 + Math.random() * 900000);
-      const tgLink = `https://t.me/${BOT_USERNAME}?start=${sessionCode}`;
+      const tgLink = `https://t.me/${caucasusjob_bot}?start=${sessionCode}`;
 
       container.innerHTML = `
         <div class="max-w-md mx-auto bg-white p-6 rounded-xl border shadow-sm text-center">

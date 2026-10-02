@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Работа в Ингушетии — Поиск работы и специалистов</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans flex flex-col min-h-screen">
+
+  <!-- Шапка сайта -->
+  <header class="bg-white shadow-sm sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-6">
+        <a href="#" onclick="router('home')" class="text-xl font-bold text-blue-600 flex items-center gap-2">
+          <i class="fa-solid fa-briefcase"></i> Работа06
+        </a>
+        <nav class="hidden md:flex space-x-4 text-sm font-medium">
+          <button onclick="router('jobs')" class="hover:text-blue-600 py-2">Найти работу</button>
+          <button onclick="router('workers')" class="hover:text-blue-600 py-2">Найти работника</button>
+        </nav>
+      </div>
+      <div class="flex items-center space-x-3" id="auth-buttons"></div>
+    </div>
+  </header>
+
+  <!-- Основной контент -->
+  <main id="app-content" class="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6"></main>
+
+  <!-- Подвал -->
+  <footer class="bg-white border-t border-gray-200 py-6 mt-12">
+    <div class="max-w-7xl mx-auto px-4 text-center text-sm text-gray-500">
+      &copy; 2026 Работа в Ингушетии. Платформа поиска работы и проверенных специалистов.
+    </div>
+  </footer>
+
+  <script>
+    // --- 1. НАСТРОЙКИ БОТА И БЭКЕНДА ---
+    const BOT_USERNAME = 'rabota06_bot'; // Юзернейм бота в Telegram (без @)
+    const BACKEND_URL = 'http://localhost:3000'; // Адрес сервера (после задеплоя замени на адрес с Render)
+
+    // --- 2. ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ (LOCALSTORAGE) ---
+    const defaultData = {
+      currentUser: null,
+      cities: ["Назрань", "Магас", "Малгобек", "Карабулак", "Сунжа"],
+      categories: ["🔌 Электрики", "🔧 Сантехники", "🧱 Строители", "🔥 Сварщики", "🚗 Водители", "🍳 Повара", "💻 IT", "🪚 Мастера"],
+      workers: [
+        {
+          id: 101,
+          name: "Магомед А.",
+          status: "🟢 Открыт к работе",
+          city: "Малгобек",
+          profession: "Электрик",
+          rating: 4.8,
+          reviewsCount: 37,
+          experience: "8 лет",
+          skills: ["Электропроводка", "Электрощиты", "Освещение", "Розетки", "Диагностика"],
+          about: "Работаю электриком 8 лет. Выполняю электромонтажные работы в частных домах и коммерческих помещениях.",
+          scores: { quality: 4.9, punctuality: 4.7, communication: 4.8 }
+        }
+      ],
+      employers: [
+        {
+          id: 201,
+          name: "ООО «КавказСтрой»",
+          city: "Назрань",
+          rating: 4.2,
+          reviewsCount: 58,
+          since: "2024",
+          about: "Крупная строительная компания Ингушетии.",
+          scores: { payment: 4.1, attitude: 4.3, conditions: 4.0 }
+        }
+      ],
+      vacancies: [
+        {
+          id: 1,
+          employerId: 201,
+          company: "ООО «КавказСтрой»",
+          title: "Электрик",
+          city: "Назрань",
+          salary: "70 000 – 90 000 ₽",
+          requirements: ["Опыт от 2 лет", "Знание электрики", "Ответственность"],
+          conditions: ["Полный рабочий день", "Оформление", "График 5/2"],
+          rating: 4.2
+        }
+      ],
+      applications: []
+    };
+
+    if (!localStorage.getItem('job_app_db')) {
+      localStorage.setItem('job_app_db', JSON.stringify(defaultData));
+    }
+    let DB = JSON.parse(localStorage.getItem('job_app_db'));
+
+    function saveData() {
+      localStorage.setItem('job_app_db', JSON.stringify(DB));
+    }
+
+    // --- 3. РОУТИНГ СТРАНИЦ ---
+    let currentView = 'home';
+    let filterParams = {};
+    let checkInterval = null;
+
+    function router(view, params = {}) {
+      if (checkInterval) clearInterval(checkInterval); // Сброс таймера авторизации при переходе
+      currentView = view;
+      filterParams = params;
+      renderAuthBar();
+      
+      const app = document.getElementById('app-content');
+      app.innerHTML = '';
+
+      switch (view) {
+        case 'home': renderHome(app); break;
+        case 'jobs': renderJobs(app); break;
+        case 'workers': renderWorkers(app); break;
+        case 'vacancy': renderVacancyDetail(app, params.id); break;
+        case 'worker_profile': renderWorkerProfile(app, params.id); break;
+        case 'post_job': renderPostJob(app); break;
+        case 'cabinet': renderCabinet(app); break;
+        case 'auth': renderAuth(app); break;
+        default: renderHome(app);
+      }
+      window.scrollTo(0,0);
+    }
+
+    function renderAuthBar() {
+      const container = document.getElementById('auth-buttons');
+      if (DB.currentUser) {
+        container.innerHTML = `
+          <button onclick="router('post_job')" class="hidden sm:inline-block bg-blue-600 text-white text-xs px-3 py-2 rounded-lg font-medium hover:bg-blue-700">+ Вакансия</button>
+          <button onclick="router('cabinet')" class="text-sm font-medium text-gray-700 hover:text-blue-600 flex items-center gap-1">
+            <i class="fa-solid fa-circle-user text-lg text-blue-600"></i> ${DB.currentUser.name}
+          </button>
+        `;
+      } else {
+        container.innerHTML = `
+          <button onclick="router('auth')" class="text-sm font-medium text-gray-700 hover:text-blue-600">Войти / Регистрация</button>
+        `;
+      }
+    }
+
+    // --- 4. РЕНДЕР СТРАНИЦ ---
+
+    // Главная страница
+    function renderHome(container) {
+      container.innerHTML = `
+        <div class="text-center py-10">
+          <h1 class="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-2">Работа рядом с тобой</h1>
+          <p class="text-gray-500 mb-8">Поиск работы и проверенных специалистов в Ингушетии</p>
+          
+          <div class="max-w-2xl mx-auto bg-white p-4 rounded-xl shadow-md flex flex-col md:flex-row gap-3">
+            <div class="flex-1 text-left">
+              <label class="block text-xs text-gray-400 font-semibold mb-1">ЧТО ИЩЕТЕ?</label>
+              <input id="search-prof" type="text" placeholder="Электрик..." class="w-full border-0 focus:ring-0 p-1 text-gray-800 font-medium placeholder-gray-300">
+            </div>
+            <div class="border-t md:border-t-0 md:border-l border-gray-200"></div>
+            <div class="w-full md:w-48 text-left">
+              <label class="block text-xs text-gray-400 font-semibold mb-1">ГДЕ?</label>
+              <select id="search-city" class="w-full border-0 focus:ring-0 p-1 font-medium text-gray-800 bg-transparent">
+                <option value="">Все города</option>
+                ${DB.cities.map(c => `<option value="${c}">${c}</option>`).join('')}
+              </select>
+            </div>
+            <div class="flex flex-col sm:flex-row gap-2">
+              <button onclick="router('jobs', {prof: document.getElementById('search-prof').value, city: document.getElementById('search-city').value})" class="bg-blue-600 text-white font-medium px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">НАЙТИ РАБОТУ</button>
+              <button onclick="router('workers', {prof: document.getElementById('search-prof').value, city: document.getElementById('search-city').value})" class="bg-emerald-600 text-white font-medium px-4 py-2 rounded-lg hover:bg-emerald-700 text-sm">НАЙТИ РАБОТНИКА</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-10">
+          <h2 class="text-lg font-bold mb-4 text-gray-800">Популярные профессии</h2>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            ${DB.categories.map(cat => `
+              <div onclick="router('jobs', {prof: '${cat.split(' ')[1]}'})" class="bg-white p-4 rounded-xl border border-gray-100 hover:border-blue-300 hover:shadow-sm cursor-pointer flex items-center justify-between">
+                <span class="font-medium text-sm text-gray-700">${cat}</span>
+                <i class="fa-solid fa-chevron-right text-xs text-gray-300"></i>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    // Список вакансий
+    function renderJobs(container) {
+      const prof = filterParams.prof || '';
+      const city = filterParams.city || '';
+      const filtered = DB.vacancies.filter(v => 
+        (prof === '' || v.title.toLowerCase().includes(prof.toLowerCase())) &&
+        (city === '' || v.city === city)
+      );
+
+      container.innerHTML = `
+        <h2 class="text-2xl font-bold mb-4">Поиск работы</h2>
+        <div class="space-y-4">
+          ${filtered.length === 0 ? '<p class="text-gray-400">Вакансий не найдено.</p>' : ''}
+          ${filtered.map(v => `
+            <div class="bg-white p-5 rounded-xl border hover:shadow-md cursor-pointer flex justify-between items-center" onclick="router('vacancy', {id: ${v.id}})">
+              <div>
+                <h3 class="text-lg font-bold text-blue-600">${v.title}</h3>
+                <p class="text-sm text-gray-600 font-medium">${v.company} <span class="text-amber-500">⭐ ${v.rating}</span></p>
+                <div class="flex gap-4 text-xs text-gray-500 mt-2">
+                  <span>📍 ${v.city}</span>
+                  <span class="font-bold text-emerald-600">${v.salary}</span>
+                </div>
+              </div>
+              <button class="bg-blue-50 text-blue-600 font-medium px-4 py-2 rounded-lg text-sm">Подробнее</button>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    // Список работников
+    function renderWorkers(container) {
+      const prof = filterParams.prof || '';
+      const city = filterParams.city || '';
+      const filtered = DB.workers.filter(w => 
+        (prof === '' || w.profession.toLowerCase().includes(prof.toLowerCase())) &&
+        (city === '' || w.city === city)
+      );
+
+      container.innerHTML = `
+        <h2 class="text-2xl font-bold mb-4">Найти специалиста</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          ${filtered.map(w => `
+            <div class="bg-white p-5 rounded-xl border hover:shadow-md cursor-pointer flex flex-col justify-between" onclick="router('worker_profile', {id: ${w.id}})">
+              <div>
+                <div class="flex justify-between items-start mb-2">
+                  <div>
+                    <h3 class="text-lg font-bold">${w.name}</h3>
+                    <p class="text-sm font-medium text-gray-600">${w.profession}</p>
+                  </div>
+                  <span class="text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full font-medium">${w.status}</span>
+                </div>
+                <p class="text-xs text-gray-500 mb-3">📍 ${w.city} • Опыт: ${w.experience}</p>
+              </div>
+              <div class="border-t pt-3 flex justify-between items-center text-sm">
+                <span class="text-amber-500 font-bold">⭐ ${w.rating} <span class="text-xs text-gray-400">(${w.reviewsCount} работ)</span></span>
+                <span class="text-blue-600 font-medium">Профиль →</span>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    // Профиль работника
+    function renderWorkerProfile(container, id) {
+      const worker = DB.workers.find(w => w.id == id) || DB.workers[0];
+      container.innerHTML = `
+        <div class="bg-white rounded-xl border p-6 max-w-3xl mx-auto shadow-sm">
+          <div class="flex justify-between items-start border-b pb-4">
+            <div>
+              <h1 class="text-2xl font-bold">${worker.name}</h1>
+              <p class="text-sm text-gray-500 mt-1">📍 ${worker.city} • ${worker.profession}</p>
+            </div>
+            <div class="text-right">
+              <div class="text-2xl font-bold text-amber-500">⭐ ${worker.rating}</div>
+              <p class="text-xs text-gray-400">${worker.reviewsCount} подтверждённых работ</p>
+            </div>
+          </div>
+          <div class="py-4 border-b">
+            <h3 class="font-bold text-sm text-gray-700 mb-2">О себе</h3>
+            <p class="text-sm text-gray-600">${worker.about}</p>
+          </div>
+          <div class="mt-6 flex gap-3">
+            <button onclick="alert('Контакты: ' + (worker.phone || '+7 (928) 000-00-00'))" class="flex-1 bg-emerald-600 text-white font-bold py-3 rounded-xl hover:bg-emerald-700">ПОЗВОНИТЬ</button>
+          </div>
+        </div>
+      `;
+    }
+
+    // Детали вакансии
+    function renderVacancyDetail(container, id) {
+      const v = DB.vacancies.find(item => item.id == id) || DB.vacancies[0];
+      container.innerHTML = `
+        <div class="bg-white rounded-xl border p-6 max-w-3xl mx-auto shadow-sm">
+          <div class="border-b pb-4">
+            <h1 class="text-2xl font-bold text-gray-900">${v.title}</h1>
+            <p class="text-md font-medium text-gray-700">${v.company} ⭐ ${v.rating}</p>
+            <div class="mt-3 text-xl font-extrabold text-emerald-600">${v.salary}</div>
+          </div>
+          <div class="mt-6 flex gap-3">
+            <button onclick="applyToJob(${v.id})" class="flex-1 bg-blue-600 text-white font-bold py-3 rounded-xl hover:bg-blue-700">ОТКЛИКНУТЬСЯ</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function applyToJob(vacancyId) {
+      if (!DB.currentUser) {
+        alert("Для отклика необходимо войти в систему!");
+        router('auth');
+        return;
+      }
+      DB.applications.push({ id: Date.now(), vacancyId, workerId: DB.currentUser.id, status: "Откликнулся" });
+      saveData();
+      alert("Ваш отклик отправлен работодателю!");
+      router('cabinet');
+    }
+
+    // --- 5. АВТОРИЗАЦИЯ ЧЕРЕЗ TELEGRAM ---
+    let selectedRole = 'worker';
+
+    function renderAuth(container) {
+      const sessionCode = 'AUTH_' + Math.floor(100000 + Math.random() * 900000);
+      const tgLink = `https://t.me/${BOT_USERNAME}?start=${sessionCode}`;
+
+      container.innerHTML = `
+        <div class="max-w-md mx-auto bg-white p-6 rounded-xl border shadow-sm text-center">
+          <h2 class="text-2xl font-bold mb-2">Вход / Регистрация</h2>
+          <p class="text-xs text-gray-400 mb-6">Авторизация за 1 секунду без СМС через Telegram</p>
+
+          <div class="mb-6 text-left">
+            <label class="block text-xs font-bold text-gray-500 mb-2">КТО ВЫ?</label>
+            <div class="grid grid-cols-2 gap-2">
+              <button id="role-w" type="button" onclick="setRole('worker')" class="p-3 border rounded-xl text-xs font-bold text-center ${selectedRole === 'worker' ? 'bg-blue-50 border-blue-500 text-blue-600' : 'text-gray-500'}">Я ищу работу</button>
+              <button id="role-e" type="button" onclick="setRole('employer')" class="p-3 border rounded-xl text-xs font-bold text-center ${selectedRole === 'employer' ? 'bg-blue-50 border-blue-500 text-blue-600' : 'text-gray-500'}">Я ищу работников</button>
+            </div>
+          </div>
+
+          <a href="${tgLink}" target="_blank" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-4 rounded-xl inline-flex items-center justify-center gap-2 text-sm transition">
+            <i class="fa-brands fa-telegram text-lg"></i> Подтвердить в Telegram
+          </a>
+
+          <p id="auth-status-text" class="text-xs text-gray-400 mt-4">Ожидание подтверждения из бота...</p>
+        </div>
+      `;
+
+      // Проверка авторизации каждые 2 секунды
+      checkInterval = setInterval(async () => {
+        try {
+          const res = await fetch(`${BACKEND_URL}/api/check-auth/${sessionCode}`);
+          const data = await res.json();
+
+          if (data.verified) {
+            clearInterval(checkInterval);
+            document.getElementById('auth-status-text').innerText = "✅ Номер подтверждён! Входим...";
+
+            const newUser = {
+              id: Date.now(),
+              name: data.name || "Пользователь",
+              phone: data.phone,
+              role: selectedRole,
+              city: "Назрань"
+            };
+
+            DB.currentUser = newUser;
+            if (selectedRole === 'worker') {
+              DB.workers.push({ id: newUser.id, name: newUser.name, phone: newUser.phone, status: "🟢 Открыт к работе", city: newUser.city, profession: "Специалист", rating: 5.0, reviewsCount: 0, experience: "1 год", skills: ["Ответственность"], about: "Ищу работу.", scores: { quality: 5.0, punctuality: 5.0, communication: 5.0 } });
+            } else {
+              DB.employers.push({ id: newUser.id, name: newUser.name, city: newUser.city, rating: 5.0, reviewsCount: 0, since: "2026", about: "Работодатель", scores: { payment: 5.0, attitude: 5.0, conditions: 5.0 } });
+            }
+
+            saveData();
+            setTimeout(() => router('cabinet'), 1000);
+          }
+        } catch (e) {
+          // Ожидание старта бэкенда
+        }
+      }, 2000);
+    }
+
+    function setRole(role) {
+      selectedRole = role;
+      router('auth');
+    }
+
+    // Кабинет
+    function renderCabinet(container) {
+      container.innerHTML = `
+        <h1 class="text-2xl font-bold mb-4">Личный кабинет</h1>
+        <div class="bg-white p-6 rounded-xl border mb-6 flex justify-between items-center">
+          <div>
+            <h2 class="text-xl font-bold">${DB.currentUser.name}</h2>
+            <p class="text-sm text-gray-500">Телефон: ${DB.currentUser.phone} | Роль: ${DB.currentUser.role === 'worker' ? 'Соискатель' : 'Работодатель'}</p>
+          </div>
+          <button onclick="DB.currentUser=null; saveData(); router('home')" class="text-xs bg-red-50 text-red-600 px-3 py-2 rounded-lg font-medium">Выйти</button>
+        </div>
+      `;
+    }
+
+    function renderPostJob(container) {
+      container.innerHTML = `<p class="p-4">Форма добавления вакансии доступна работодателям.</p>`;
+    }
+
+    // Запуск приложения
+    router('home');
+  </script>
+</body>
+</html>
